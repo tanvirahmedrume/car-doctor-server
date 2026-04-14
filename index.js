@@ -8,7 +8,19 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 5000;
 
-// ================= MIDDLEWARE =================
+// Add this BEFORE your routes
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Origin', req.headers.origin);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cookie');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// Then your existing CORS
 app.use(
   cors({
     origin: [
@@ -21,7 +33,11 @@ app.use(
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Accept'],
   })
+
 );
+
+// ================= MIDDLEWARE =================
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -33,14 +49,21 @@ const logger = (req, res, next) => {
 
 // Verify JWT middleware
 const verifyToken = (req, res, next) => {
-  const token = req.cookies?.token;
-
-  console.log("Checking token...");
-  console.log("Cookies received:", req.cookies);
-
+  // Try to get token from cookie first
+  let token = req.cookies?.token;
+  
+  // If no cookie, try Authorization header
   if (!token) {
-    console.log("No token found in cookies");
-    return res.status(401).send({ message: "Unauthorized - No token provided" });
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+      console.log("Token found in Authorization header");
+    }
+  }
+  
+  if (!token) {
+    console.log("No token found in cookie or header");
+    return res.status(401).send({ message: "Unauthorized - No token" });
   }
 
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
@@ -54,7 +77,6 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
-
 // ================= ROUTES =================
 app.get("/", (req, res) => {
   res.send("Car Doctor server is running...");
@@ -81,38 +103,44 @@ async function run() {
     const bookingCollection = client.db("carDoctor").collection("booking");
 
     // ================= JWT API =================
-    app.post("/jwt", logger, async (req, res) => {
-      try {
-        const user = req.body;
+app.post("/jwt", logger, async (req, res) => {
+  try {
+    const user = req.body;
 
-        if (!user?.email) {
-          return res.status(400).send({ message: "Email required" });
-        }
+    if (!user?.email) {
+      return res.status(400).send({ message: "Email required" });
+    }
 
-        const token = jwt.sign(
-          { email: user.email },
-          process.env.ACCESS_TOKEN_SECRET,
-          { expiresIn: "7d" }
-        );
+    const token = jwt.sign(
+      { email: user.email },
+      process.env.ACCESS_TOKEN_SECRET,
+      { expiresIn: "7d" }
+    );
 
-        // Set cookie with proper settings for production
-        res.cookie("token", token, {
-          httpOnly: true,
-          secure: true, // Must be true for HTTPS
-          sameSite: "none", // Required for cross-origin requests
-          domain: ".up.railway.app", // Allow cookie on all subdomains
-          path: "/",
-          maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-        });
-
-        console.log("JWT token created for:", user.email);
-        res.send({ success: true, message: "Token created successfully" });
-      } catch (err) {
-        console.error("JWT Error:", err);
-        res.status(500).send({ error: err.message });
-      }
+    // CRITICAL FIX - Updated cookie settings
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none", // MUST be 'none' for cross-origin
+      // REMOVE the domain line - let it be automatic
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
+    console.log("JWT token created for:", user.email);
+    console.log("Cookie set with:", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      path: "/"
+    });
+    
+    res.send({ success: true, message: "Token created successfully" });
+  } catch (err) {
+    console.error("JWT Error:", err);
+    res.status(500).send({ error: err.message });
+  }
+});
     // ================= LOGOUT API =================
     app.post("/logout", async (req, res) => {
       res.clearCookie("token", {
