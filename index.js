@@ -126,13 +126,12 @@ app.post("/jwt", logger, async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    console.log("JWT token created for:", user.email);
     
     // 🔥 ADD THIS LINE - Return token in response
-    res.send({ success: true, message: "Token created successfully", token: token });
+    res.send({ success: true, token });
     
   } catch (err) {
-    console.error("JWT Error:", err);
+   
     res.status(500).send({ error: err.message });
   }
 });
