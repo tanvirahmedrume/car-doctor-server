@@ -13,47 +13,55 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
-      "https://cardoctor-a1530.web.app",
       "http://localhost:5174",
-      "https://cardoctor-a1530.firebaseapp.com",
+      "https://cardoctor-a1530.web.app",
+      "https://cardoctor-a1530.firebaseapp.com"
     ],
     credentials: true,
-  }),
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'Accept'],
+  })
 );
 app.use(express.json());
 app.use(cookieParser());
 
-// logger middleware
+// Logger middleware
 const logger = (req, res, next) => {
-  console.log("called:", req.method, req.hostname, req.originalUrl);
+  console.log(`${req.method} ${req.originalUrl} - ${new Date().toISOString()}`);
   next();
 };
 
-// verify JWT
+// Verify JWT middleware
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
 
+  console.log("Checking token...");
+  console.log("Cookies received:", req.cookies);
+
   if (!token) {
-    return res.status(401).send({ message: "Unauthorized" });
+    console.log("No token found in cookies");
+    return res.status(401).send({ message: "Unauthorized - No token provided" });
   }
 
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     if (err) {
-      return res.status(401).send({ message: "Unauthorized" });
+      console.log("Token verification failed:", err.message);
+      return res.status(401).send({ message: "Unauthorized - Invalid token" });
     }
 
-    req.user = decoded; // 🔥 important
+    console.log("Token verified for email:", decoded.email);
+    req.user = decoded;
     next();
   });
 };
 
 // ================= ROUTES =================
 app.get("/", (req, res) => {
-  res.send("Doctor server is running...");
+  res.send("Car Doctor server is running...");
 });
 
-// MongoDB
-const uri = `mongodb://${process.env.DB_USER}:${process.env.DB_PASS}@ac-cijrguo-shard-00-00.ot5pbdy.mongodb.net:27017,ac-cijrguo-shard-00-01.ot5pbdy.mongodb.net:27017,ac-cijrguo-shard-00-02.ot5pbdy.mongodb.net:27017/?ssl=true&replicaSet=atlas-kf3nj0-shard-0&authSource=admin&appName=ClusterCarDoctor`;
+// ================= MONGODB CONNECTION =================
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@clusterCardoctor.ot5pbdy.mongodb.net/?retryWrites=true&w=majority&appName=ClusterCarDoctor`;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -65,8 +73,9 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
+    // Connect to MongoDB
     await client.connect();
-    console.log("✅ MongoDB Connected");
+    console.log("✅ MongoDB Connected Successfully");
 
     const serviceCollection = client.db("carDoctor").collection("services");
     const bookingCollection = client.db("carDoctor").collection("booking");
@@ -83,27 +92,46 @@ async function run() {
         const token = jwt.sign(
           { email: user.email },
           process.env.ACCESS_TOKEN_SECRET,
-          { expiresIn: "1h" },
+          { expiresIn: "7d" }
         );
 
-        res
-          .cookie("token", token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-          })
-          .send({ success: true });
+        // Set cookie with proper settings for production
+        res.cookie("token", token, {
+          httpOnly: true,
+          secure: true, // Must be true for HTTPS
+          sameSite: "none", // Required for cross-origin requests
+          domain: ".up.railway.app", // Allow cookie on all subdomains
+          path: "/",
+          maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        });
+
+        console.log("JWT token created for:", user.email);
+        res.send({ success: true, message: "Token created successfully" });
       } catch (err) {
+        console.error("JWT Error:", err);
         res.status(500).send({ error: err.message });
       }
     });
 
-    // ================= SERVICES =================
+    // ================= LOGOUT API =================
+    app.post("/logout", async (req, res) => {
+      res.clearCookie("token", {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        domain: ".up.railway.app",
+        path: "/"
+      });
+      res.send({ success: true, message: "Logged out successfully" });
+    });
+
+    // ================= SERVICES API =================
     app.get("/services", async (req, res) => {
       try {
         const result = await serviceCollection.find().toArray();
         res.send(result);
       } catch (err) {
+        console.error("Error fetching services:", err);
         res.status(500).send({ error: err.message });
       }
     });
@@ -113,7 +141,7 @@ async function run() {
         const id = req.params.id;
 
         if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ message: "Invalid ID" });
+          return res.status(400).send({ message: "Invalid ID format" });
         }
 
         const result = await serviceCollection.findOne({
@@ -121,50 +149,61 @@ async function run() {
         });
 
         if (!result) {
-          return res.status(404).send({ message: "Not found" });
+          return res.status(404).send({ message: "Service not found" });
         }
 
         res.send(result);
       } catch (err) {
+        console.error("Error fetching service:", err);
         res.status(500).send({ error: err.message });
       }
     });
 
-    // ================= BOOKINGS =================
+    // ================= BOOKINGS API =================
 
-    // GET booking (secured)
+    // GET bookings (secured)
     app.get("/booking", logger, verifyToken, async (req, res) => {
       try {
         const email = req.query.email;
 
-        // 🔥 prevent data leak
+        console.log("GET /booking - Email:", email);
+        console.log("User from token:", req.user.email);
+
+        // Security check - prevent data leak
         if (email !== req.user.email) {
-          return res.status(403).send({ message: "Forbidden Access" });
+          console.log("Forbidden access - Email mismatch");
+          return res.status(403).send({ message: "Forbidden Access - Email mismatch" });
         }
 
-        const query = {
-          "customerInfo.email": email,
-        };
-
+        const query = { "customerInfo.email": email };
         const result = await bookingCollection.find(query).toArray();
+        
+        console.log(`Found ${result.length} bookings for ${email}`);
         res.send(result);
       } catch (err) {
+        console.error("Error fetching bookings:", err);
         res.status(500).send({ error: err.message });
       }
     });
 
-    // CREATE booking
+    // CREATE booking (no auth required)
     app.post("/booking", async (req, res) => {
       try {
         const booking = req.body;
 
-        if (!booking) {
-          return res.status(400).send({ message: "Invalid data" });
+        if (!booking || !booking.customerInfo?.email) {
+          return res.status(400).send({ message: "Invalid booking data" });
         }
 
+        // Add timestamps
+        booking.createdAt = new Date();
+        booking.status = booking.status || "pending";
+
         const result = await bookingCollection.insertOne(booking);
+        console.log("Booking created for:", booking.customerInfo.email);
         res.send(result);
       } catch (err) {
+        console.error("Error creating booking:", err);
         res.status(500).send({ error: err.message });
       }
     });
@@ -176,7 +215,18 @@ async function run() {
         const updated = req.body;
 
         if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ message: "Invalid ID" });
+          return res.status(400).send({ message: "Invalid ID format" });
+        }
+
+        // Verify the booking belongs to the user
+        const booking = await bookingCollection.findOne({ _id: new ObjectId(id) });
+        
+        if (!booking) {
+          return res.status(404).send({ message: "Booking not found" });
+        }
+
+        if (booking.customerInfo.email !== req.user.email) {
+          return res.status(403).send({ message: "Forbidden - Not your booking" });
         }
 
         const result = await bookingCollection.updateOne(
@@ -184,12 +234,15 @@ async function run() {
           {
             $set: {
               status: updated.status,
+              updatedAt: new Date()
             },
-          },
+          }
         );
 
+        console.log("Booking updated:", id, "Status:", updated.status);
         res.send(result);
       } catch (err) {
+        console.error("Error updating booking:", err);
         res.status(500).send({ error: err.message });
       }
     });
@@ -200,41 +253,48 @@ async function run() {
         const id = req.params.id;
 
         if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ message: "Invalid ID" });
+          return res.status(400).send({ message: "Invalid ID format" });
+        }
+
+        // Verify the booking belongs to the user
+        const booking = await bookingCollection.findOne({ _id: new ObjectId(id) });
+        
+        if (!booking) {
+          return res.status(404).send({ message: "Booking not found" });
+        }
+
+        if (booking.customerInfo.email !== req.user.email) {
+          return res.status(403).send({ message: "Forbidden - Not your booking" });
         }
 
         const result = await bookingCollection.deleteOne({
           _id: new ObjectId(id),
         });
 
+        console.log("Booking deleted:", id);
         res.send(result);
       } catch (err) {
+        console.error("Error deleting booking:", err);
         res.status(500).send({ error: err.message });
       }
     });
 
-    // logout
-    app.post("/logout", async (req, res) => {
-      res
-        .clearCookie("token", {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-        })
-        .send({ success: true });
-    });
+    // ================= OPTIONS PRE-FLIGHT =================
+    app.options('*', cors());
 
-    // ================= PING =================
+    // Test MongoDB connection
     await client.db("admin").command({ ping: 1 });
     console.log("🚀 MongoDB Ping Success");
+
   } catch (err) {
-    console.error("❌ DB Connection Failed:", err);
+    console.error("❌ Database Connection Failed:", err);
   }
 }
 
+// Start the server
 run().catch(console.dir);
 
-// ================= SERVER =================
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
