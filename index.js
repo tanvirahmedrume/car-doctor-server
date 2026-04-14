@@ -121,21 +121,16 @@ app.post("/jwt", logger, async (req, res) => {
     res.cookie("token", token, {
       httpOnly: true,
       secure: true,
-      sameSite: "none", // MUST be 'none' for cross-origin
-      // REMOVE the domain line - let it be automatic
+      sameSite: "none",
       path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     console.log("JWT token created for:", user.email);
-    console.log("Cookie set with:", {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      path: "/"
-    });
     
-    res.send({ success: true, message: "Token created successfully" });
+    // 🔥 ADD THIS LINE - Return token in response
+    res.send({ success: true, message: "Token created successfully", token: token });
+    
   } catch (err) {
     console.error("JWT Error:", err);
     res.status(500).send({ error: err.message });
