@@ -11,9 +11,14 @@ const port = process.env.PORT || 5000;
 // ================= MIDDLEWARE =================
 app.use(
   cors({
-    origin: ["http://localhost:5173" ,"https://cardoctor-a1530.web.app", "http://localhost:5174"],
+    origin: [
+      "http://localhost:5173",
+      "https://cardoctor-a1530.web.app",
+      "http://localhost:5174",
+      "https://cardoctor-a1530.firebaseapp.com",
+    ],
     credentials: true,
-  })
+  }),
 );
 app.use(express.json());
 app.use(cookieParser());
@@ -63,12 +68,8 @@ async function run() {
     await client.connect();
     console.log("✅ MongoDB Connected");
 
-    const serviceCollection = client
-      .db("carDoctor")
-      .collection("services");
-    const bookingCollection = client
-      .db("carDoctor")
-      .collection("booking");
+    const serviceCollection = client.db("carDoctor").collection("services");
+    const bookingCollection = client.db("carDoctor").collection("booking");
 
     // ================= JWT API =================
     app.post("/jwt", logger, async (req, res) => {
@@ -82,15 +83,14 @@ async function run() {
         const token = jwt.sign(
           { email: user.email },
           process.env.ACCESS_TOKEN_SECRET,
-          { expiresIn: "1h" }
+          { expiresIn: "1h" },
         );
 
         res
           .cookie("token", token, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
-            sameSite:
-              process.env.NODE_ENV === "production" ? "none" : "lax",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
           })
           .send({ success: true });
       } catch (err) {
@@ -185,7 +185,7 @@ async function run() {
             $set: {
               status: updated.status,
             },
-          }
+          },
         );
 
         res.send(result);
@@ -211,6 +211,17 @@ async function run() {
       } catch (err) {
         res.status(500).send({ error: err.message });
       }
+    });
+
+    // logout
+    app.post("/logout", async (req, res) => {
+      res
+        .clearCookie("token", {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        })
+        .send({ success: true });
     });
 
     // ================= PING =================
