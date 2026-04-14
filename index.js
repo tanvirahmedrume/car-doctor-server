@@ -11,7 +11,7 @@ const port = process.env.PORT || 5000;
 // ================= MIDDLEWARE =================
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: ["http://localhost:5173" ,"https://cardoctor-a1530.web.app"],
     credentials: true,
   })
 );
